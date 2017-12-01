@@ -1,0 +1,269 @@
+﻿                        +--------------------+
+                        |        CS 521      |
+                        | PROJECT 1: THREADS |
+                        |   DESIGN DOCUMENT  |
+                        +--------------------+
+                                   
+---- GROUP ----
+
+>> Fill in the names and email addresses of your group members.
+
+Zhenggang Xue <zhenggan@buffalo.edu>
+Jing Qiu <jingqiu@buffalo.edu>
+Zhengxiong Li <zhengxio@buffalo.edu>
+
+---- PRELIMINARIES ----
+
+>> If you have any preliminary comments on your submission, notes for the
+>> TAs, or extra credit, please give them here.
+
+>> Please cite any offline or online sources you consulted while
+>> preparing your submission, other than the Pintos documentation, course
+>> text, lecture notes, and course staff.
+
+                             ALARM CLOCK
+                             ===========
+
+---- DATA STRUCTURES ----
+
+>> A1: Copy here the declaration of each new or changed `struct' or
+>> `struct' member, global or static variable, `typedef', or
+>> enumeration.  Identify the purpose of each in 25 words or less.
+
+
+<struct thread>:
+int64_t sleep_ticks_remain;    /*Remaining time(ticks) to unblock(end sleep)*/
+
+thread.c
+/*called by thread_foreach to try awake thread or reduce sleeping time*/
+void check_blocked_threads(struct thread *t, void *aux);
+
+---- ALGORITHMS ----
+
+>> A2: Briefly describe what happens in a call to timer_sleep(),
+>> including the effects of the timer interrupt handler.
+First, get the ticks parameter of timer_sleep(int64_t ticks). Disable interrupt, assign this ticks to current thread’s member variable sleep_ticks_remain, then block current thread, and at last recover previous intr_level. In function of thread_block(), current thread is added to blocked-list and then schedule() will be revoked. 
+Every time, in timer_interrupt(), we will check all blocked threads and reduce their sleep_ticks_remian by 1 accordingly to see if they can be awake when their sleep_ticks_remian have been decreased to 0. If yes, thread_unblock() will be invoked.
+
+
+Optimize: we need to compare x_ticks and the current_ticks - start_ticks, we can compare current_ticks and start_ticks + x_ticks, so we just need to store start_ticks + x_ticks instead of start_ticks and x_ticks
+The ready queue_order in descending priority. Wake up(unblock the ticks) the list base on their order and set their ticks value to 0.
+
+>> A3: What steps are taken to minimize the amount of time spent in
+>> the timer interrupt handler?
+The ready_queue store the thread so that can figure out which thread will be wake up base on its order. Besides, minimize the time cost in timer_interrupt() function.
+
+---- SYNCHRONIZATION ----
+
+>> A4: How are race conditions avoided when multiple threads call
+>> timer_sleep() simultaneously?
+Turn off the interrupt when we read the ticks and assigned it to member variable “sleep_ticks_remain”. And turn on the interrupt as soon as possible to avoid system latency.
+
+>> A5: How are race conditions avoided when a timer interrupt occurs
+>> during a call to timer_sleep()?
+It avoid the busy waiting, so no use of interrupt handler.
+
+---- RATIONALE ----
+
+>> A6: Why did you choose this design?  In what ways is it superior to
+>> another design you considered?
+Base on the suggestion on the assignment sheet, the thread will be put into the blocked_queue for x ticks, and then back to ready_queue, which avoids busy-waiting.
+
+
+                         PRIORITY SCHEDULING
+                         ===================
+
+---- DATA STRUCTURES ----
+
+>> B1: Copy here the declaration of each new or changed `struct' or
+>> `struct' member, global or static variable, `typedef', or
+>> enumeration.  Identify the purpose of each in 25 words or less.
+We add these three members into thread struct:
+        {
+   int primitive_priority;    /*Primitive priority*/
+    struct list locks;    /*Locks that held by this thread*/
+    struct lock *lock_acquiring;    /*lock that this thread's acquiring and waiting*/
+    
+
+        }
+primitive_priority is an int type variable to record the original thread priority.
+locks is a list that record the locks that the thread holds.
+lock_acquiring is a pointer type variable to record the locks that thread is waiting for.
+
+
+
+>> B2: Explain the data structure used to track priority donation.
+>> Use ASCII art to diagram a nested donation.  (Alternately, submit a
+>> .png file.)
+In order to track priority donation, we need to know the processing of priority donation, which means we need to know the each thread status and each lock status. 
+struct list thread_status;
+struct list lock_status;
+Thread_status is a list to record the acquired lock and waiting lock in each thread.
+Lock_status is a list to record the held thread and the following threads that requires.
+(a nested donation diagram is as below)
+************                      ************                    ************
+*Thread 1  *                      *Thread 2  *                    *Thread 3  *
+*Priority 1* <--Wait for Lock A-- *Priority 2*<--Wait for Lock B--*Priority 3*
+*Lock A    *                      *Lock B    *                    *          *
+************                      ************                    ************
+Actual Priority: 3              Actual Priority: 3            Actual Priority: 3
+
+
+---- ALGORITHMS ----
+
+>> B3: How do you ensure that the highest priority thread waiting for
+>> a lock, semaphore, or condition variable wakes up first?
+We make sure that when do these operations, the highest priority thread has the maximum priority.The semaphore wait queue is a priority queue.
+If there is lock in this thread, the lock priority is modified to the highest priority by the priority donation.
+
+
+
+>> B4: Describe the sequence of events when a call to lock_acquire()
+>> causes a priority donation.  How is nested donation handled?
+1. After a call to lock_acquire(), lock_donate_priority() would be facilitated.
+2. If lock exists, continue. If lock is not held, return. 
+3. Find the maximum effective priority of all the threads in the waiting queue.
+4. If the lock held has a bigger priority than this one, return. Then we set this thread’s priority to the lock holder’s priority.
+5. We block current thread at the front of the ready queue. Then we could finish priority donation and handle nested donation.
+
+
+>> B5: Describe the sequence of events when lock_release() is called
+>> on a lock that a higher-priority thread is waiting for.
+1. After lock_release() is called, the process is almost similar to the lock_acquire() to some extent.
+2. If there is a lock, continue. Remove the lock from lock held list and set the holder to NULL.
+3. Use sema_up() function to unblock the maximum priority thread in the waiting list.
+
+
+---- SYNCHRONIZATION ----
+
+>> B6: Describe a potential race in thread_set_priority() and explain
+>> how your implementation avoids it.  Can you use a lock to avoid
+>> this race?
+A potential race in thread_set_priority() may be that when we try to set the priority in the ready queue, the interrupt handler is also accessing it at the same time. 
+In this situation, we can not use a lock to avoid this race. We could turn off the interrupt handler to solve this problem.
+
+
+
+---- RATIONALE ----
+
+>> B7: Why did you choose this design?  In what ways is it superior to
+>> another design you considered?
+This design is easy to apply and work effectively. It could avoid race and starvation.
+
+
+
+                          ADVANCED SCHEDULER
+                          ==================
+
+---- DATA STRUCTURES ----
+
+>> C1: Copy here the declaration of each new or changed `struct' or
+>> `struct' member, global or static variable, `typedef', or
+>> enumeration.  Identify the purpose of each in 25 words or less.
+
+In "thread.h", modify thread struct and add:
+#DEFINE PRI_MIN 0
+#DEFINE PRI_MAX 63
+#DEFINE NICE_MIN -20
+#DEFINE NICE_MAX 20
+
+struct thread{
+        ...
+        int nice;                /* current thread's nice value, init value is 0*/
+        int recent_cpu;                /*updated recent_cpu value, init value is 0*/
+};
+
+In "thread.c"", add global variable:
+static int load_avg;   /*updated load average value, init value is 0*/
+static struct Ready_Queues ready_queues[PRI_MAX - PRI_MIN + 1];  
+        /*ready queues, numbered 0(PRI_MIN) through 63(PRI_MAX)*/
+
+---- ALGORITHMS ----
+
+>> C2: Suppose threads A, B, and C have nice values 0, 1, and 2.  Each
+>> has a recent_cpu value of 0.  Fill in the table below showing the
+>> scheduling decision and the priority and recent_cpu values for each
+>> thread after each given number of timer ticks:
+
+timer  recent_cpu    priority   thread
+ticks   A   B   C   A   B   C   to run
+-----  --  --  --  --  --  --   ------
+0       0   0   0  63  61  59          A
+4       4   0   0  62  61  59          A
+8       8   0   0  61  61  59          B
+12      8   4   0  61  60  59          A
+16     12   4   0  60  60  59          B
+20     12   8   0  60  59  59          A
+24     16   8   0  59  59  59          C
+28     16   8   4  59  59  58          B
+32     16  12   4  59  58  58          A
+36     20  12   4  58  58  58          C
+
+>> C3: Did any ambiguities in the scheduler specification make values
+>> in the table uncertain?  If so, what rule did you use to resolve
+>> them?  Does this match the behavior of your scheduler?
+Yes. 
+1, it is ambiguous when two or more threads have the same priority. Different schemes will cause different execution order. We solve this with strategy of "Round Robin". If multiple threads have the same highest priority, they will be switched in round-robin order and it matches the behavior of my scheduler.
+2, it is ambiguous when to update recent_cpu. Is it before or after updating the priorities. In our implementation, the recent_cpu will be updated before updating the priorities. 
+
+
+>> C4: How is the way you divided the cost of scheduling between code
+>> inside and outside interrupt context likely to affect performance?
+In scheduling, all threads' variables should be updated. However, the current running thread's priority only needs to be updated every 4 ticks, and it is the only thread and procedure changing recent_cpu. This implementation improves performance by reducing the time in interrupt handler. Besides, what the really expensive thing is that load_avg, recent_cpu, and priority need to be recalculated every second for all threads when there are plenty of threads. Most calculation of scheduling occurs in interrupt handler. The only potential calculation outside it is thread_set_nice function in which interrupts must be turn off.
+
+
+---- RATIONALE ----
+
+>> C5: Briefly critique your design, pointing out advantages and
+>> disadvantages in your design choices.  If you were to have extra
+>> time to work on this part of the project, how might you choose to
+>> refine or improve your design?
+Advantages:
+We use 64 queues since it is simple to understand and easy to implement. It takes constant time other than linear time to add a new process into ready queue.
+Disadvantages:
+It is more complicated when dealing with sorting, and more performance-damaging when turning off interrupts rather than using locking variables. 
+Improvements:
+Set the maximum iteration depth 8 in deadlock detection to avoid infinite loop. Besides, we may use locking variables to replace the strategy of turning off interrupts in synchronization to improve system operating speed.
+
+
+>> C6: The assignment explains arithmetic for fixed-point math in
+>> detail, but it leaves it open to you to implement it.  Why did you
+>> decide to implement it the way you did?  If you created an
+>> abstraction layer for fixed-point math, that is, an abstract data
+>> type and/or a set of functions or macros to manipulate fixed-point
+>> numbers, why did you do so?  If not, why not?
+As mentioned in the BSD scheduling manual, recent_cpu and load_avg are real 
+numbers, but pintos disabled float numbers. Instead using float number, we can 
+use fixed-point numbers. So we use fixed-point numbers to represent recent_cpu 
+and load_avg, such as new type of fixed_t.
+
+We used #define macro in the new created header fixed-point.h under thread. The reason is that #define macro is simple and fast. Below are some examples:
+#define FP_SHIFT_AMOUNT 16
+#define FP_ADD(A,B) (A + B)
+#define FP_ADD_MIX(A,B) (A + (B << FP_SHIFT_AMOUNT))
+
+
+
+                           SURVEY QUESTIONS
+                           ================
+
+Answering these questions is optional, but it will help us improve the
+course in future quarters.  Feel free to tell us anything you
+want--these questions are just to spur your thoughts.  You may also
+choose to respond anonymously in the course evaluations at the end of
+the quarter.
+
+>> In your opinion, was this assignment, or any one of the three problems
+>> in it, too easy or too hard?  Did it take too long or too little time?
+
+>> Did you find that working on a particular part of the assignment gave
+>> you greater insight into some aspect of OS design?
+
+>> Is there some particular fact or hint we should give students in
+>> future quarters to help them solve the problems?  Conversely, did you
+>> find any of our guidance to be misleading?
+
+>> Do you have any suggestions for the TAs to more effectively assist
+>> students, either for future quarters or the remaining projects?
+
+>> Any other comments?
